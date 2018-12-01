@@ -332,5 +332,16 @@ func (pc PbConverter) canFuncBePushed(sf *ScalarFunction) bool {
 
 		return true
 	}
-	return false
+
+	for node := range funcs {
+		if node == sf.FuncName.L {
+			return false
+		}
+	}
+
+	if sf.FuncName.L == ast.Cast {
+		return false
+	}
+
+	return true
 }

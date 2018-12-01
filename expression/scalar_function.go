@@ -70,6 +70,14 @@ func (sf *ScalarFunction) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("\"%s\"", sf)), nil
 }
 
+var callLua = &evalLuaFunctionClass{
+	baseFunctionClass{
+		funcName: "callLua",
+		minArgs:  2,
+		maxArgs:  2,
+	},
+}
+
 // newFunctionImpl creates a new scalar function or constant.
 func newFunctionImpl(ctx sessionctx.Context, fold bool, funcName string, retType *types.FieldType, args ...Expression) (Expression, error) {
 	if retType == nil {
@@ -80,7 +88,10 @@ func newFunctionImpl(ctx sessionctx.Context, fold bool, funcName string, retType
 	}
 	fc, ok := funcs[funcName]
 	if !ok {
-		return nil, errFunctionNotExists.GenWithStackByArgs("FUNCTION", funcName)
+		// TODO
+		fold = false
+		fc = callLua
+		// return nil, errFunctionNotExists.GenWithStackByArgs("FUNCTION", funcName)
 	}
 	funcArgs := make([]Expression, len(args))
 	copy(funcArgs, args)
