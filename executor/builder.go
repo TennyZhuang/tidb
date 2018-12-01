@@ -1538,6 +1538,7 @@ func (b *executorBuilder) constructDAGReq(plans []plannercore.PhysicalPlan) (dag
 	sc := b.ctx.GetSessionVars().StmtCtx
 	dagReq.Flags = statementContextToFlags(sc)
 	dagReq.Executors, streaming, err = constructDistExec(b.ctx, plans)
+	fmt.Printf("=====req4===%+v\n", dagReq)
 	return dagReq, streaming, errors.Trace(err)
 }
 

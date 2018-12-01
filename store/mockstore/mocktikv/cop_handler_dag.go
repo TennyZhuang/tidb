@@ -15,9 +15,7 @@ package mocktikv
 
 import (
 	"bytes"
-	"io"
-	"time"
-
+	"fmt"
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/coprocessor"
@@ -40,6 +38,8 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"io"
+	"time"
 )
 
 var dummySlice = make([]byte, 0)
@@ -52,11 +52,15 @@ type dagContext struct {
 
 func (h *rpcHandler) handleCopDAGRequest(req *coprocessor.Request) *coprocessor.Response {
 	resp := &coprocessor.Response{}
+	// fmt.Println("====----- co req context====---", req.)
 	if err := h.checkRequestContext(req.GetContext()); err != nil {
 		resp.RegionError = err
 		return resp
 	}
+	// fmt.Println("======co pro re=======", req)
+	// fmt.Println("======co pro resp=======", resp)
 	dagCtx, e, dagReq, err := h.buildDAGExecutor(req)
+	// fmt.Printf("dsafs fasdfsdafdsa======-------")
 	if err != nil {
 		resp.OtherError = err.Error()
 		return resp
@@ -107,6 +111,7 @@ func (h *rpcHandler) buildDAGExecutor(req *coprocessor.Request) (*dagContext, ex
 		return nil, nil, nil, errors.Trace(err)
 	}
 
+	fmt.Println("=====------hahahah req=====----", dagReq)
 	ctx := &dagContext{
 		dagReq:    dagReq,
 		keyRanges: req.Ranges,
@@ -132,6 +137,7 @@ func constructTimeZone(name string, offset int) (*time.Location, error) {
 
 func (h *rpcHandler) handleCopStream(ctx context.Context, req *coprocessor.Request) (tikvpb.Tikv_CoprocessorStreamClient, error) {
 	dagCtx, e, dagReq, err := h.buildDAGExecutor(req)
+	// fmt.Printf("===-----=====shahaha")
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -462,6 +468,8 @@ func (mock *mockCopStreamClient) Recv() (*coprocessor.Response, error) {
 		hook.(func(context.Context))(mock.ctx)
 	}
 
+	fmt.Printf("======req-------============ %+v\n", mock.req)
+	fmt.Printf("%+v\n", mock.req.Executors)
 	var resp coprocessor.Response
 	counts := make([]int64, len(mock.req.Executors))
 	chunk, finish, ran, counts, warnings, err := mock.readBlockFromExecutor()

@@ -18,6 +18,7 @@
 package expression
 
 import (
+	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/types"
@@ -57,5 +58,7 @@ func (c *builtinEvalLuaSig) Clone() builtinFunc {
 // }
 
 func (b *builtinEvalLuaSig) evalJSON(row chunk.Row) (res json.BinaryJSON, isNull bool, err error) {
+	fmt.Println("====row====", row)
+	fmt.Println("====res====", res)
 	panic("Should push down")
 }

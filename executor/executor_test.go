@@ -650,7 +650,17 @@ func (s *testSuite) TestSelectStringLiteral(c *C) {
 	c.Check(len(fields), Equals, 1)
 	c.Check(fields[0].Column.Name.O, Equals, "ss")
 }
+func (s *testSuite) TestPushDown(c *C) {
+	tk := testkit.NewTestKit(c, s.store)
+	tk.MustExec("use test")
+	tk.MustExec("Create table fuck (id int)")
+	tk.MustExec("insert into fuck values(1)")
+	tk.MustExec("insert into fuck values(2)")
+	tk.MustExec("insert into fuck values(3)")
 
+	tk.MustExec("select * from fuck where id = 2")
+
+}
 func (s *testSuite) TestSelectLimit(c *C) {
 	tk := testkit.NewTestKit(c, s.store)
 	tk.MustExec("use test")
@@ -2750,6 +2760,24 @@ func (s *testSuite) TestUnsignedPk(c *C) {
 	num2Str := strconv.FormatUint(num2, 10)
 	tk.MustQuery("select * from t order by id").Check(testkit.Rows("1", "2", num1Str, num2Str))
 	tk.MustQuery("select * from t where id not in (2)").Check(testkit.Rows(num1Str, num2Str, "1"))
+}
+
+func (s *testSuite) TestEvalLua(c *C) {
+	tk := testkit.NewTestKitWithInit(c, s.store)
+
+	tk.MustExec("drop table if exists t")
+	tk.MustExec("create table t(id bigint unsigned primary key)")
+	var num1, num2 uint64 = math.MaxInt64 + 1, math.MaxInt64 + 2
+	tk.MustExec(fmt.Sprintf("insert into t values(%v), (%v), (1), (2)", num1, num2))
+	// num1Str := strconv.FormatUint(num1, 10)
+	// num2Str := strconv.FormatUint(num2, 10)
+	// tk.MustQuery("select * from t order by id").Check(testkit.Rows("1", "2", num1Str, num2Str))
+	// tk.MustQuery("select * from t where id not in (2)").Check(testkit.Rows(num1Str, num2Str, "1"))
+	fmt.Println("=======start lua ======")
+	// tk.MustQuery("select id from t where Lua(\"fuck\", \"{}\")")
+	// tk.MustQuery("select 1")
+
+	// tk.MustQuery("select id from t where id = 2")
 }
 
 func (s *testSuite) TestEarlyClose(c *C) {

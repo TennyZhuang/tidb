@@ -12,8 +12,8 @@ require (
 	github.com/coreos/go-semver v0.2.0 // indirect
 	github.com/coreos/go-systemd v0.0.0-20181031085051-9002847aa142 // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
-	github.com/cznic/mathutil v0.0.0-20181021201202-eba54fb065b7
-	github.com/cznic/sortutil v0.0.0-20150617083342-4c7342852e65
+	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548
+	github.com/cznic/sortutil v0.0.0-20181122101858-f5f958428db8
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
@@ -56,7 +56,6 @@ require (
 	github.com/prometheus/client_model v0.0.0-20180712105110-5c3871d89910
 	github.com/prometheus/common v0.0.0-20181020173914-7e9e6cabbd39 // indirect
 	github.com/prometheus/procfs v0.0.0-20181005140218-185b4288413d // indirect
-	github.com/remyoudompheng/bigfft v0.0.0-20170806203942-52369c62f446 // indirect
 	github.com/shirou/gopsutil v2.18.10+incompatible
 	github.com/shurcooL/httpfs v0.0.0-20171119174359-809beceb2371 // indirect
 	github.com/shurcooL/vfsgen v0.0.0-20181020040650-a97a25d856ca // indirect
@@ -86,3 +85,5 @@ require (
 )
 
 replace github.com/pingcap/tipb => ../tipb
+
+replace github.com/pingcap/parser => ../parser
