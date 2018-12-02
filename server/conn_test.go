@@ -36,7 +36,7 @@ var _ = Suite(ConnTestSuite{})
 
 func (ts ConnTestSuite) TestParseUDF(c *C) {
 	c.Parallel()
-	f, err := tryParseUDF("CREATE FUNCTION fuck (x1 decimal, x2 decimal) RETURNS decimal $ a + b $")
+	f, err := tryParseUDF("CREATE FUNCTION fuck (x1 decimal, x2 decimal) RETURNS decimal $ x1 + x2 $")
 	fmt.Println(f, err)
 }
 
