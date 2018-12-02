@@ -14,6 +14,7 @@
 package planner
 
 import (
+	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/tidb/infoschema"
@@ -34,6 +35,7 @@ func Optimize(ctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema) (
 	// build logical plan
 	ctx.GetSessionVars().PlanID = 0
 	ctx.GetSessionVars().PlanColumnID = 0
+	fmt.Printf("======== AST ===== ", node)
 	builder := plannercore.NewPlanBuilder(ctx, is)
 	p, err := builder.Build(node)
 	if err != nil {

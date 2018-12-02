@@ -56,6 +56,7 @@ var DeferredFunctions = map[string]struct{}{
 	ast.UTCDate:          {},
 	ast.Rand:             {},
 	ast.UUID:             {},
+	"Lua":                {},
 }
 
 // inequalFunctions stores functions which cannot be propagated from column equal condition.

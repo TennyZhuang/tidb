@@ -14,8 +14,7 @@
 package expression
 
 import (
-	"time"
-
+	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/parser/charset"
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/tidb/util/codec"
 	"github.com/pingcap/tipb/go-tipb"
 	log "github.com/sirupsen/logrus"
+	"time"
 )
 
 // ExpressionsToPB converts expression to tipb.Expr.
@@ -89,6 +89,7 @@ func NewPBConverter(client kv.Client, sc *stmtctx.StatementContext) PbConverter 
 
 // ExprToPB converts Expression to TiPB.
 func (pc PbConverter) ExprToPB(expr Expression) *tipb.Expr {
+	fmt.Println("=====----- start in expr to pb====", expr)
 	switch x := expr.(type) {
 	case *Constant, *CorrelatedColumn:
 		return pc.conOrCorColToPBExpr(expr)
@@ -229,11 +230,14 @@ func (pc PbConverter) columnToPBExpr(column *Column) *tipb.Expr {
 func (pc PbConverter) scalarFuncToPBExpr(expr *ScalarFunction) *tipb.Expr {
 	// check whether this function can be pushed.
 	if !pc.canFuncBePushed(expr) {
+		fmt.Println("======check error=====", expr)
 		return nil
 	}
 
 	// check whether this function has ProtoBuf signature.
 	pbCode := expr.Function.PbCode()
+	fmt.Println("=-=====-=-=pb code =======%d ==== , %s", pbCode, expr.FuncName)
+
 	if pbCode < 0 {
 		return nil
 	}
@@ -335,6 +339,7 @@ func (pc PbConverter) canFuncBePushed(sf *ScalarFunction) bool {
 
 	for node := range funcs {
 		if node == sf.FuncName.L {
+			fmt.Println("======func name=====", sf.FuncName.L)
 			return false
 		}
 	}

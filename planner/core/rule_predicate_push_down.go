@@ -13,6 +13,7 @@
 package core
 
 import (
+	"fmt"
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/parser/model"
 	"github.com/pingcap/parser/mysql"
@@ -72,6 +73,7 @@ func splitSetGetVarFunc(filters []expression.Expression) ([]expression.Expressio
 // PredicatePushDown implements LogicalPlan PredicatePushDown interface.
 func (p *LogicalSelection) PredicatePushDown(predicates []expression.Expression) ([]expression.Expression, LogicalPlan) {
 	canBePushDown, canNotBePushDown := splitSetGetVarFunc(p.Conditions)
+	fmt.Println("=======predicate push down ======", canBePushDown, canNotBePushDown)
 	retConditions, child := p.children[0].PredicatePushDown(append(canBePushDown, predicates...))
 	retConditions = append(retConditions, canNotBePushDown...)
 	if len(retConditions) > 0 {

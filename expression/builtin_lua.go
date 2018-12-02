@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/types"
-	"github.com/pingcap/tidb/types/json"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tipb/go-tipb"
 )
@@ -39,8 +38,8 @@ func (c *evalLuaFunctionClass) getFunction(ctx sessionctx.Context, args []Expres
 	if err := c.verifyArgs(args); err != nil {
 		return nil, errors.Trace(err)
 	}
-	argTps := []types.EvalType{types.ETString, types.ETJson}
-	bf := newBaseBuiltinFuncWithTp(ctx, args, types.ETJson, argTps...)
+	argTps := []types.EvalType{types.ETString, types.ETString}
+	bf := newBaseBuiltinFuncWithTp(ctx, args, types.ETInt, argTps...)
 	sig := &builtinEvalLuaSig{bf}
 	sig.setPbCode(tipb.ScalarFuncSig_EvalLua)
 	return sig, nil
@@ -57,8 +56,11 @@ func (c *builtinEvalLuaSig) Clone() builtinFunc {
 // 	panic("Not implemented")
 // }
 
-func (b *builtinEvalLuaSig) evalJSON(row chunk.Row) (res json.BinaryJSON, isNull bool, err error) {
+func (b *builtinEvalLuaSig) evalInt(row chunk.Row) (res int64, isNull bool, err error) {
 	fmt.Println("====row====", row)
-	fmt.Println("====res====", res)
-	panic("Should push down")
+	// fmt.Println("====res====", res)
+	fmt.Println("should push down")
+	// panic("Should push down")
+
+	return 1, false, nil
 }

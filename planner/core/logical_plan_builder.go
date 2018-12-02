@@ -486,6 +486,7 @@ func (b *PlanBuilder) buildSelection(p LogicalPlan, where ast.ExprNode, AggMappe
 		}
 		p = np
 		if expr == nil {
+			fmt.Println("result expr is nil!!")
 			continue
 		}
 		cnfItems := expression.SplitCNFItems(expr)
@@ -504,6 +505,7 @@ func (b *PlanBuilder) buildSelection(p LogicalPlan, where ast.ExprNode, AggMappe
 		}
 	}
 	if len(expressions) == 0 {
+		fmt.Println("Empty!!")
 		return p, nil
 	}
 	selection.Conditions = expressions
@@ -1711,6 +1713,7 @@ func (b *PlanBuilder) buildSelect(sel *ast.SelectStmt) (p LogicalPlan, err error
 	}
 
 	if sel.Where != nil {
+		fmt.Println("build selection , ", sel.Where)
 		p, err = b.buildSelection(p, sel.Where, nil)
 		if err != nil {
 			return nil, errors.Trace(err)

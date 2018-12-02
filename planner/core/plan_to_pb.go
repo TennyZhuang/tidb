@@ -14,6 +14,7 @@
 package core
 
 import (
+	"fmt"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/model"
 	"github.com/pingcap/tidb/expression"
@@ -58,6 +59,7 @@ func (p *PhysicalStreamAgg) ToPB(ctx sessionctx.Context) (*tipb.Executor, error)
 
 // ToPB implements PhysicalPlan ToPB interface.
 func (p *PhysicalSelection) ToPB(ctx sessionctx.Context) (*tipb.Executor, error) {
+	fmt.Println("====start call topb====")
 	sc := ctx.GetSessionVars().StmtCtx
 	client := ctx.GetClient()
 	selExec := &tipb.Selection{

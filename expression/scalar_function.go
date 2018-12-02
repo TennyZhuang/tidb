@@ -72,7 +72,7 @@ func (sf *ScalarFunction) MarshalJSON() ([]byte, error) {
 
 var callLua = &evalLuaFunctionClass{
 	baseFunctionClass{
-		funcName: "callLua",
+		funcName: "Lua",
 		minArgs:  2,
 		maxArgs:  2,
 	},
@@ -89,6 +89,7 @@ func newFunctionImpl(ctx sessionctx.Context, fold bool, funcName string, retType
 	fc, ok := funcs[funcName]
 	if !ok {
 		// TODO
+		fmt.Println("set fold success", funcName)
 		fold = false
 		fc = callLua
 		// return nil, errFunctionNotExists.GenWithStackByArgs("FUNCTION", funcName)
@@ -108,8 +109,10 @@ func newFunctionImpl(ctx sessionctx.Context, fold bool, funcName string, retType
 		Function: f,
 	}
 	if fold {
+		fmt.Println("run fold", funcName)
 		return FoldConstant(sf), nil
 	}
+	fmt.Println("didn't run fold")
 	return sf, nil
 }
 
