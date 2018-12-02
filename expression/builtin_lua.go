@@ -34,6 +34,20 @@ type builtinEvalLuaSig struct {
 	baseBuiltinFunc
 }
 
+type Argument struct {
+	Name string
+	Tp   types.EvalType
+}
+
+type LuaFunc struct {
+	Name  string
+	Body  string
+	Args  []Argument
+	RetTp types.EvalType
+}
+
+var LuaFunctionMap = make(map[string]LuaFunc)
+
 func (c *evalLuaFunctionClass) getFunction(ctx sessionctx.Context, args []Expression) (builtinFunc, error) {
 	if err := c.verifyArgs(args); err != nil {
 		return nil, errors.Trace(err)

@@ -54,6 +54,7 @@ import (
 	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/executor"
+	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/sessionctx"
@@ -890,18 +891,6 @@ func (cc *clientConn) handleLoadStats(ctx context.Context, loadStatsInfo *execut
 	return errors.Trace(loadStatsInfo.Update(prevData))
 }
 
-type Argument struct {
-	Name string
-	Tp   types.EvalType
-}
-
-type LuaFunc struct {
-	Name  string
-	Body  string
-	Args  []Argument
-	RetTp types.EvalType
-}
-
 var tpMap = map[string]types.EvalType{
 	"int":     types.ETInt,
 	"real":    types.ETReal,
@@ -909,7 +898,7 @@ var tpMap = map[string]types.EvalType{
 	"string":  types.ETString,
 }
 
-func tryParseUDF(sql string) (f *LuaFunc, err error) {
+func tryParseUDF(sql string) (f *expression.LuaFunc, err error) {
 	parts := strings.Split(sql, "$")
 	if len(parts) != 3 {
 		return nil, errors.New("$ split failed")
@@ -948,14 +937,14 @@ func tryParseUDF(sql string) (f *LuaFunc, err error) {
 
 	arg := sig[1:i]
 	parts = strings.Split(arg, ",")
-	args := make([]Argument, 0)
+	args := make([]expression.Argument, 0)
 	for _, part := range parts {
 		t := strings.Fields(strings.TrimSpace(part))
 		if len(t) != 2 {
 			return nil, errors.New(fmt.Sprintf("fail arg, len(t) != 2"))
 		}
 		if tp, tok := tpMap[strings.ToLower(strings.TrimSpace(t[1]))]; tok {
-			args = append(args, Argument{
+			args = append(args, expression.Argument{
 				Tp:   tp,
 				Name: strings.TrimSpace(t[0]),
 			})
@@ -975,7 +964,7 @@ func tryParseUDF(sql string) (f *LuaFunc, err error) {
 		return nil, errors.New("ret tp not found")
 	}
 
-	return &LuaFunc{
+	return &expression.LuaFunc{
 		Name:  name,
 		Body:  body,
 		Args:  args,
