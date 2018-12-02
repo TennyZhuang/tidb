@@ -58,6 +58,7 @@ import (
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/sessionctx/variable"
+	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/arena"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/hack"
@@ -889,11 +890,109 @@ func (cc *clientConn) handleLoadStats(ctx context.Context, loadStatsInfo *execut
 	return errors.Trace(loadStatsInfo.Update(prevData))
 }
 
+type Argument struct {
+	Name string
+	Tp   types.EvalType
+}
+
+type LuaFunc struct {
+	Name  string
+	Body  string
+	Args  []Argument
+	RetTp types.EvalType
+}
+
+var tpMap = map[string]types.EvalType{
+	"int":     types.ETInt,
+	"real":    types.ETReal,
+	"decimal": types.ETDecimal,
+	"string":  types.ETString,
+}
+
+func tryParseUDF(sql string) (f *LuaFunc, err error) {
+	parts := strings.Split(sql, "$")
+	if len(parts) != 3 {
+		return nil, errors.New("$ split failed")
+	}
+	body := parts[1]
+	parts = strings.Fields(parts[0])
+	tmp := make([]string, 0)
+	for _, p := range parts {
+		if p != "" {
+			tmp = append(tmp, p)
+		}
+	}
+	parts = tmp
+	if len(parts) < 3 {
+		return nil, errors.New("len(parts) < 3")
+	}
+	if strings.ToLower(parts[0]) != "create" || strings.ToLower(parts[1]) != "function" {
+		return nil, errors.New("not create function")
+	}
+
+	name := parts[2]
+	sig := strings.TrimSpace(strings.Join(parts[3:], " "))
+	if sig[0] != '(' {
+		return nil, errors.New("not (")
+	}
+	var i int
+	var c rune
+	for i, c = range sig {
+		if c == ')' {
+			break
+		}
+	}
+	if i == len(sig) {
+		return nil, errors.New("not )")
+	}
+
+	arg := sig[1:i]
+	parts = strings.Split(arg, ",")
+	args := make([]Argument, 0)
+	for _, part := range parts {
+		t := strings.Fields(strings.TrimSpace(part))
+		if len(t) != 2 {
+			return nil, errors.New(fmt.Sprintf("fail arg, len(t) != 2"))
+		}
+		if tp, tok := tpMap[strings.ToLower(strings.TrimSpace(t[1]))]; tok {
+			args = append(args, Argument{
+				Tp:   tp,
+				Name: strings.TrimSpace(t[0]),
+			})
+		} else {
+			return nil, errors.New("arg tp not found")
+		}
+	}
+
+	ret := sig[i+1:]
+	parts = strings.Fields(strings.TrimSpace(ret))
+	if len(parts) < 2 || strings.ToLower(parts[0]) != "returns" {
+		return nil, errors.New("No return")
+	}
+
+	retTp, tok := tpMap[parts[1]]
+	if !tok {
+		return nil, errors.New("ret tp not found")
+	}
+
+	return &LuaFunc{
+		Name:  name,
+		Body:  body,
+		Args:  args,
+		RetTp: retTp,
+	}, nil
+}
+
 // handleQuery executes the sql query string and writes result set or result ok to the client.
 // As the execution time of this function represents the performance of TiDB, we do time log and metrics here.
 // There is a special query `load data` that does not return result, which is handled differently.
 // Query `load stats` does not return result either.
 func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
+	if f, err := tryParseUDF(sql); err == nil {
+		// Hack it
+		fmt.Println(f.Name, f.Body)
+		return nil
+	}
 	rs, err := cc.ctx.Execute(ctx, sql)
 	if err != nil {
 		metrics.ExecuteErrorCounter.WithLabelValues(metrics.ExecuteErrorToLabel(err)).Inc()

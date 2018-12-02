@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/parser/mysql"
@@ -32,6 +33,12 @@ type ConnTestSuite struct {
 }
 
 var _ = Suite(ConnTestSuite{})
+
+func (ts ConnTestSuite) TestParseUDF(c *C) {
+	c.Parallel()
+	f, err := tryParseUDF("CREATE FUNCTION fuck (x1 decimal, x2 decimal) RETURNS decimal $ a + b $")
+	fmt.Println(f, err)
+}
 
 func (ts ConnTestSuite) TestMalformHandshakeHeader(c *C) {
 	c.Parallel()
