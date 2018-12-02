@@ -46,18 +46,36 @@ type LuaFunc struct {
 	RetTp types.EvalType
 }
 
-var LuaFunctionMap = make(map[string]LuaFunc)
+var LuaFunctionMap = make(map[string]*LuaFunc)
 
 func (c *evalLuaFunctionClass) getFunction(ctx sessionctx.Context, args []Expression) (builtinFunc, error) {
 	if err := c.verifyArgs(args); err != nil {
 		return nil, errors.Trace(err)
 	}
-	argTps := []types.EvalType{types.ETString, types.ETString}
-	bf := newBaseBuiltinFuncWithTp(ctx, args, types.ETInt, argTps...)
+	funcName, isNull, err := args[0].EvalString(ctx, chunk.Row{}) // Constant will not use row
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var errFuncNotFound = errors.New("No such function")
+	if isNull {
+		return nil, errors.Trace(errFuncNotFound)
+	}
+	f, ok := LuaFunctionMap[funcName]
+	if !ok {
+		return nil, errors.Trace(errFuncNotFound)
+	}
+	if len(args) != len(f.Args)+1 {
+		return nil, errors.Trace(errors.New("Invalid number of argument"))
+	}
+	argTps := []types.EvalType{types.ETString}
+	for _, arg := range f.Args {
+		argTps = append(argTps, arg.Tp)
+	}
+	// argTps := []types.EvalType{types.ETString, types.ETString}
+	bf := newBaseBuiltinFuncWithTp(ctx, args, f.RetTp, argTps...)
 	sig := &builtinEvalLuaSig{bf}
 	sig.setPbCode(tipb.ScalarFuncSig_EvalLua)
 	return sig, nil
-
 }
 
 func (c *builtinEvalLuaSig) Clone() builtinFunc {

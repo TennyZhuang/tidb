@@ -73,8 +73,8 @@ func (sf *ScalarFunction) MarshalJSON() ([]byte, error) {
 var callLua = &evalLuaFunctionClass{
 	baseFunctionClass{
 		funcName: "Lua",
-		minArgs:  2,
-		maxArgs:  2,
+		minArgs:  1,
+		maxArgs:  -1,
 	},
 }
 

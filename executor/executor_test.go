@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/executor"
+	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/meta/autoid"
 	"github.com/pingcap/tidb/planner"
@@ -2769,12 +2770,28 @@ func (s *testSuite) TestEvalLua(c *C) {
 	tk.MustExec("create table t(id bigint unsigned primary key)")
 	var num1, num2 uint64 = math.MaxInt64 + 1, math.MaxInt64 + 2
 	tk.MustExec(fmt.Sprintf("insert into t values(%v), (%v), (1), (2)", num1, num2))
+	addF := &expression.LuaFunc{
+		Name: "add",
+		Args: []expression.Argument{
+			{
+				Name: "a",
+				Tp:   types.ETInt,
+			},
+			{
+				Name: "b",
+				Tp:   types.ETInt,
+			},
+		},
+		Body:  "a + b",
+		RetTp: types.ETInt,
+	}
+	expression.LuaFunctionMap[addF.Name] = addF
 	// num1Str := strconv.FormatUint(num1, 10)
 	// num2Str := strconv.FormatUint(num2, 10)
 	// tk.MustQuery("select * from t order by id").Check(testkit.Rows("1", "2", num1Str, num2Str))
 	// tk.MustQuery("select * from t where id not in (2)").Check(testkit.Rows(num1Str, num2Str, "1"))
-	fmt.Println("=======start lua ======")
-	tk.MustQuery("select id from t where Lua(\"fuck\", \"{}\") = 1")
+	fmt.Println("=======start-lua ======")
+	tk.MustQuery("select id from t where Lua(\"add\", 1, id) = 3")
 	// tk.MustQuery("select 1")
 
 	// tk.MustQuery("select id from t where id = 2")
