@@ -904,6 +904,7 @@ func tryParseUDF(sql string) (f *expression.LuaFunc, err error) {
 		return nil, errors.New("$ split failed")
 	}
 	body := parts[1]
+	body = strings.Trim(body, "\"")
 	parts = strings.Fields(parts[0])
 	tmp := make([]string, 0)
 	for _, p := range parts {
@@ -980,7 +981,9 @@ func (cc *clientConn) handleQuery(ctx context.Context, sql string) (err error) {
 	if f, err := tryParseUDF(sql); err == nil {
 		// Hack it
 		fmt.Println(f.Name, f.Body)
-		return nil
+		expression.LuaFunctionMap[f.Name] = f
+		err = cc.writeOK()
+		return err
 	}
 	rs, err := cc.ctx.Execute(ctx, sql)
 	if err != nil {

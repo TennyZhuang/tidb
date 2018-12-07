@@ -18,20 +18,18 @@
 package expression
 
 import (
-	"fmt"
+	// "fmt"
+	"errors"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tipb/go-tipb"
+	"github.com/yuin/gopher-lua"
 )
 
-type evalLuaFunctionClass struct {
+type luaFunctionClass struct {
 	baseFunctionClass
-}
-
-type builtinEvalLuaSig struct {
-	baseBuiltinFunc
 }
 
 type Argument struct {
@@ -46,9 +44,14 @@ type LuaFunc struct {
 	RetTp types.EvalType
 }
 
+type builtinLuaSig struct {
+	baseBuiltinFunc
+	l *LuaFunc
+}
+
 var LuaFunctionMap = make(map[string]*LuaFunc)
 
-func (c *evalLuaFunctionClass) getFunction(ctx sessionctx.Context, args []Expression) (builtinFunc, error) {
+func (c *luaFunctionClass) getFunction(ctx sessionctx.Context, args []Expression) (builtinFunc, error) {
 	if err := c.verifyArgs(args); err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -73,26 +76,89 @@ func (c *evalLuaFunctionClass) getFunction(ctx sessionctx.Context, args []Expres
 	}
 	// argTps := []types.EvalType{types.ETString, types.ETString}
 	bf := newBaseBuiltinFuncWithTp(ctx, args, f.RetTp, argTps...)
-	sig := &builtinEvalLuaSig{bf}
-	sig.setPbCode(tipb.ScalarFuncSig_EvalLua)
+	sig := &builtinLuaSig{bf, f}
+	sig.setPbCode(tipb.ScalarFuncSig_Lua)
 	return sig, nil
 }
 
-func (c *builtinEvalLuaSig) Clone() builtinFunc {
-	newSig := &builtinEvalLuaSig{}
+func (c *builtinLuaSig) Clone() builtinFunc {
+	newSig := &builtinLuaSig{}
 	newSig.cloneFrom(&c.baseBuiltinFunc)
+	newSig.l = c.l
 	return newSig
 }
 
-// func (b *builtinEvalLuaSig) evalReal(row chunk.Row) (float64, bool, error) {
+// func (b *builtinLuaSig) evalReal(row chunk.Row) (float64, bool, error) {
 // 	panic("Not implemented")
 // }
 
-func (b *builtinEvalLuaSig) evalInt(row chunk.Row) (res int64, isNull bool, err error) {
-	fmt.Println("====row====", row)
-	// fmt.Println("====res====", res)
-	fmt.Println("should push down")
-	// panic("Should push down")
+func (b *builtinLuaSig) evalLua(row chunk.Row) (res lua.LValue, isNull bool, err error) {
+	L := lua.NewState()
+	defer L.Close()
 
-	return 1, false, nil
+	for i, arg := range b.l.Args {
+		switch arg.Tp {
+		case types.ETString:
+			s, subIsNull, err := b.args[i+1].EvalString(b.ctx, row)
+			if err != nil {
+				return nil, subIsNull, err
+			}
+			L.SetGlobal(arg.Name, lua.LString(s))
+
+		case types.ETInt:
+			itg, subIsNull, err := b.args[i+1].EvalInt(b.ctx, row)
+			if err != nil {
+				return nil, subIsNull, err
+			}
+			L.SetGlobal(arg.Name, lua.LNumber(float64(itg)))
+
+		case types.ETReal:
+			r, subIsNull, err := b.args[i+1].EvalReal(b.ctx, row)
+			if err != nil {
+				return nil, subIsNull, err
+			}
+			L.SetGlobal(arg.Name, lua.LNumber(r))
+
+		case types.ETDecimal:
+			d, subIsNull, err := b.args[i+1].EvalDecimal(b.ctx, row)
+			if err != nil {
+				return nil, subIsNull, err
+			}
+			f, err := d.ToFloat64()
+			if err != nil {
+				return nil, true, err
+			}
+			L.SetGlobal(arg.Name, lua.LNumber(f))
+		}
+	}
+
+	if err := L.DoString(b.l.Body); err != nil {
+		return nil, false, err
+	}
+
+	v := L.GetGlobal("result")
+	if v == nil {
+		return nil, false, errors.New("result not found")
+	}
+	return v, false, nil
 }
+
+func (b *builtinLuaSig) evalInt(row chunk.Row) (res int64, isNull bool, err error) {
+	v, isNull, err := b.evalLua(row)
+	return int64(v.(lua.LNumber)), isNull, err
+}
+
+func (b *builtinLuaSig) evalReal(row chunk.Row) (res float64, isNull bool, err error) {
+	v, isNull, err := b.evalLua(row)
+	return float64(v.(lua.LNumber)), isNull, err
+}
+
+func (b *builtinLuaSig) EvalString(row chunk.Row) (res string, isNull bool, err error) {
+	v, isNull, err := b.evalLua(row)
+	return string(v.(lua.LString)), isNull, err
+}
+
+// func (b *builtinLuaSig) evalDecimal(row chunk.Row) (res *types.MyDecimal, isNull bool, err error) {
+// 	v, isNull, err := b.evalLua(row)
+// 	return types.float64(v.(lua.LNumber)), isNull, err
+// }

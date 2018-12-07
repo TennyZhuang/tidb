@@ -70,7 +70,7 @@ func (sf *ScalarFunction) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("\"%s\"", sf)), nil
 }
 
-var callLua = &evalLuaFunctionClass{
+var callLua = &luaFunctionClass{
 	baseFunctionClass{
 		funcName: "Lua",
 		minArgs:  1,

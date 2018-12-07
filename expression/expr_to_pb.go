@@ -348,5 +348,5 @@ func (pc PbConverter) canFuncBePushed(sf *ScalarFunction) bool {
 		return false
 	}
 
-	return true
+	return false
 }

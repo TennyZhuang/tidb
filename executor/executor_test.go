@@ -2782,7 +2782,7 @@ func (s *testSuite) TestEvalLua(c *C) {
 				Tp:   types.ETInt,
 			},
 		},
-		Body:  "a + b",
+		Body:  "result = a + b",
 		RetTp: types.ETInt,
 	}
 	expression.LuaFunctionMap[addF.Name] = addF
@@ -2791,7 +2791,7 @@ func (s *testSuite) TestEvalLua(c *C) {
 	// tk.MustQuery("select * from t order by id").Check(testkit.Rows("1", "2", num1Str, num2Str))
 	// tk.MustQuery("select * from t where id not in (2)").Check(testkit.Rows(num1Str, num2Str, "1"))
 	fmt.Println("=======start-lua ======")
-	tk.MustQuery("select id from t where Lua(\"add\", 1, id) = 3")
+	tk.MustQuery("select id from t where Lua(\"add\", 1, id) = 2").Check(testkit.Rows("1"))
 	// tk.MustQuery("select 1")
 
 	// tk.MustQuery("select id from t where id = 2")

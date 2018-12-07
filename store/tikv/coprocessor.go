@@ -597,6 +597,7 @@ func (worker *copIteratorWorker) handleTaskOnce(bo *Backoffer, task *copTask, ch
 	// 	return nil, errors.New("mock handleTaskOnce error")
 	// }
 
+	fmt.Printf("=======store ========= %#v\n", worker.store)
 	sender := NewRegionRequestSender(worker.store.regionCache, worker.store.client)
 	req := &tikvrpc.Request{
 		Type: task.cmdType,
