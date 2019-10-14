@@ -1298,6 +1298,11 @@ func (s *session) DropPreparedStmt(stmtID uint32) error {
 }
 
 func (s *session) Txn(active bool) (kv.Transaction, error) {
+	logutil.BgLogger().Error(
+		"session::Txn is called",
+		zap.Bool("pending", s.txn.pending()),
+		zap.Bool("active", active),
+	)
 	if s.txn.pending() && active {
 		// Transaction is lazy initialized.
 		// PrepareTxnCtx is called to get a tso future, makes s.txn a pending txn,

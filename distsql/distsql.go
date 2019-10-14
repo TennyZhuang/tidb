@@ -49,7 +49,7 @@ func Select(ctx context.Context, sctx sessionctx.Context, kvReq *kv.Request, fie
 	if !sctx.GetSessionVars().EnableStreaming {
 		kvReq.Streaming = false
 	}
-	resp := sctx.GetClient().Send(ctx, kvReq, sctx.GetSessionVars().KVVars)
+	resp := sctx.GetClient().Send(sctx, ctx, kvReq, sctx.GetSessionVars().KVVars)
 	if resp == nil {
 		err := errors.New("client returns nil response")
 		return nil, err

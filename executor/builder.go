@@ -49,6 +49,8 @@ import (
 	"github.com/pingcap/tidb/util/stringutil"
 	"github.com/pingcap/tidb/util/timeutil"
 	"github.com/pingcap/tipb/go-tipb"
+
+	"github.com/pingcap/tidb/util/logutil"
 )
 
 var (
@@ -1652,8 +1654,10 @@ func constructDistExec(sctx sessionctx.Context, plans []plannercore.PhysicalPlan
 }
 
 func (b *executorBuilder) constructDAGReq(plans []plannercore.PhysicalPlan) (dagReq *tipb.DAGRequest, streaming bool, err error) {
+	logutil.BgLogger().Error("constructDAGReq is called")
 	dagReq = &tipb.DAGRequest{}
-	dagReq.StartTs, err = b.getStartTS()
+	dagReq.StartTs = 0 // Fill start ts after target regions are resolved.
+	// dagReq.StartTs, err = b.getStartTS()
 	if err != nil {
 		return nil, false, err
 	}

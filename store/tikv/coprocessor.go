@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/coprocessor"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/store/tikv/tikvrpc"
@@ -37,6 +38,8 @@ import (
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/memory"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/tidb/sessionctx"
 )
 
 var tikvTxnRegionsNumHistogramWithCoprocessor = metrics.TiKVTxnRegionsNumHistogram.WithLabelValues("coprocessor")
@@ -46,16 +49,76 @@ type CopClient struct {
 	kv.RequestTypeSupportedChecker
 	store           *tikvStore
 	replicaReadSeed uint32
+
+	// `selfRegion` indicates which data center the TiDB is in.
+	selfRegion   string
+	cachedStores []*metapb.Store
+}
+
+func (c *CopClient) getTikvStoreInSameRegion(ctx context.Context) (filtered []*metapb.Store, err error) {
+	if len(c.cachedStores) == 0 {
+		c.cachedStores, err = c.store.GetPDClient().GetAllStores(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	filtered = make([]*metapb.Store, 0, len(c.cachedStores))
+	for _, s := range c.cachedStores {
+		if s.Region == c.selfRegion {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
+}
+
+func (c *CopClient) getAppliedIndexAndTs(bo *Backoffer, ctxArray []*RPCContext) (uint64, []uint64) {
+	return 0, make([]uint64, 0)
+}
+
+func (c *CopClient) sendReqWithAppliedIndices(
+	req *kv.Request,
+	tasks []*copTask,
+	appliedIndices []uint64,
+	stores *metapb.Store,
+) (kv.Response, error) {
+	return nil, errors.New("unimplemented")
 }
 
 // Send builds the request and gets the coprocessor iterator response.
-func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variables) kv.Response {
-	ctx = context.WithValue(ctx, txnStartKey, req.StartTs)
+func (c *CopClient) Send(sctx sessionctx.Context, ctx context.Context, req *kv.Request, vars *kv.Variables) kv.Response {
 	bo := NewBackoffer(ctx, copBuildTaskMaxBackoff).WithVars(vars)
 	tasks, err := buildCopTasks(bo, c.store.regionCache, &copRanges{mid: req.KeyRanges}, req)
 	if err != nil {
 		return copErrorResponse{err}
 	}
+
+	if sctx != nil {
+		// Improvement for access TiKVs and PDs in different DCs.
+		var rpcCtxArray = make([]*RPCContext, 0, len(tasks))
+		for _, task := range tasks {
+			rpcCtx, err := c.store.regionCache.GetTiKVRPCContext(bo, task.region, kv.ReplicaReadLeader, 0)
+			if err != nil {
+				return copErrorResponse{err}
+			}
+			rpcCtxArray = append(rpcCtxArray, rpcCtx)
+		}
+		startTs, appliedIndices := c.getAppliedIndexAndTs(bo, rpcCtxArray)
+		req.StartTs = startTs
+
+		stores, err := c.getTikvStoreInSameRegion(ctx)
+		if err != nil {
+			return copErrorResponse{err}
+		}
+		for _, s := range stores {
+			resp, err := c.sendReqWithAppliedIndices(req, tasks, appliedIndices, s)
+			if err != nil {
+				return copErrorResponse{err}
+			}
+			return resp
+		}
+	}
+
 	it := &copIterator{
 		store:           c.store,
 		req:             req,
