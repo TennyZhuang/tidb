@@ -1204,11 +1204,16 @@ func (b *executorBuilder) getStartTS() (uint64, error) {
 	}
 
 	startTS := b.ctx.GetSessionVars().SnapshotTS
+	if startTS != 0 {
+		b.startTS = startTS
+		return startTS, nil
+	}
+
 	txn, err := b.ctx.Txn(true)
 	if err != nil {
 		return 0, err
 	}
-	if startTS == 0 && txn.Valid() {
+	if txn.Valid() {
 		startTS = txn.StartTS()
 	}
 	b.startTS = startTS
