@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/coprocessor"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/store/tikv/tikvrpc"
@@ -37,6 +38,9 @@ import (
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/memory"
 	"go.uber.org/zap"
+
+	"github.com/petermattis/goid"
+	"github.com/pingcap/tipb/go-tipb"
 )
 
 var tikvTxnRegionsNumHistogramWithCoprocessor = metrics.TiKVTxnRegionsNumHistogram.WithLabelValues("coprocessor")
@@ -46,16 +50,110 @@ type CopClient struct {
 	kv.RequestTypeSupportedChecker
 	store           *tikvStore
 	replicaReadSeed uint32
+
+	// `selfRegion` indicates which data center the TiDB is in.
+	selfRegion   string
+	cachedStores []*metapb.Store
+}
+
+func (c *CopClient) getTikvStoresInSameRegion(ctx context.Context) (filtered []*metapb.Store, err error) {
+	if len(c.cachedStores) == 0 {
+		c.cachedStores, err = c.store.GetPDClient().GetAllStores(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	filtered = make([]*metapb.Store, 0, len(c.cachedStores))
+	for _, s := range c.cachedStores {
+		if s.Region == c.selfRegion {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
+}
+
+func (c *CopClient) getAppliedIndices(bo *Backoffer, ctxArray []*RPCContext) ([]uint64, error) {
+	return nil, errors.New("unimplemented")
+}
+
+func (c *CopClient) sendReqWithAppliedIndices(
+	req *kv.Request,
+	tasks []*copTask,
+	appliedIndices []uint64,
+	stores *metapb.Store,
+) (kv.Response, error) {
+	return nil, errors.New("unimplemented")
 }
 
 // Send builds the request and gets the coprocessor iterator response.
 func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variables) kv.Response {
+	logutil.BgLogger().Error(
+		"CopClient::Send is called",
+		zap.Int64("goid", goid.Get()),
+	)
 	ctx = context.WithValue(ctx, txnStartKey, req.StartTs)
 	bo := NewBackoffer(ctx, copBuildTaskMaxBackoff).WithVars(vars)
 	tasks, err := buildCopTasks(bo, c.store.regionCache, &copRanges{mid: req.KeyRanges}, req)
 	if err != nil {
 		return copErrorResponse{err}
 	}
+
+	if req.StartTs == 0 {
+		if req.StartTsFuture == nil {
+			panic("StartTs and StartTsFuture can't be nil")
+		}
+		// Improvement for access TiKVs and PDs in different DCs.
+		var rpcCtxArray = make([]*RPCContext, 0, len(tasks))
+		for _, task := range tasks {
+			rpcCtx, err := c.store.regionCache.GetTiKVRPCContext(bo, task.region, kv.ReplicaReadLeader, 0)
+			if err != nil {
+				logutil.BgLogger().Error("CopClient::Send gets contexts fail, fallback")
+				goto FALLBACK
+			}
+			rpcCtxArray = append(rpcCtxArray, rpcCtx)
+		}
+
+		fallback := false
+		appliedIndices, err := c.getAppliedIndices(bo, rpcCtxArray)
+		if err != nil {
+			logutil.BgLogger().Error("CopClient::Send gets applied indices fail, fallback")
+			fallback = true
+		}
+
+		req.StartTs, err = req.StartTsFuture.Wait()
+		if err != nil {
+			logutil.BgLogger().Error("CopClient::Send wait ts fail", zap.Error(err))
+			return copErrorResponse{err}
+		}
+		logutil.BgLogger().Error("CopClient::Send gets start ts", zap.Uint64("ts", req.StartTs))
+
+		// TODO: avoid unmarshal/marshal twice.
+		dagReq := new(tipb.DAGRequest)
+		dagReq.Unmarshal(req.Data)
+		dagReq.StartTs = req.StartTs
+		if req.Data, err = dagReq.Marshal(); err != nil {
+			panic("marshal dag request shoudn't fail")
+		}
+
+		if fallback {
+			goto FALLBACK
+		}
+
+		stores, err := c.getTikvStoresInSameRegion(ctx)
+		if err != nil {
+			return copErrorResponse{err}
+		}
+		for _, s := range stores {
+			resp, err := c.sendReqWithAppliedIndices(req, tasks, appliedIndices, s)
+			if err != nil {
+				return copErrorResponse{err}
+			}
+			return resp
+		}
+	}
+FALLBACK:
+
 	it := &copIterator{
 		store:           c.store,
 		req:             req,

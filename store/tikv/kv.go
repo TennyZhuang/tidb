@@ -282,6 +282,10 @@ func (s *tikvStore) GetSnapshot(ver kv.Version) (kv.Snapshot, error) {
 	return snapshot, nil
 }
 
+func (s *tikvStore) GetPDClient() pd.Client {
+	return s.pdClient
+}
+
 func (s *tikvStore) Close() error {
 	mc.Lock()
 	defer mc.Unlock()

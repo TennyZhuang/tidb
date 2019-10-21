@@ -29,6 +29,8 @@ import (
 	"github.com/pingcap/tidb/util/execdetails"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/tidb/util/futures"
 )
 
 var (
@@ -492,6 +494,10 @@ func (txn *tikvTxn) IsReadOnly() bool {
 
 func (txn *tikvTxn) StartTS() uint64 {
 	return txn.startTS
+}
+
+func (txn *tikvTxn) StartTSFuture() (futures.TSFuture, error) {
+	return nil, nil
 }
 
 func (txn *tikvTxn) Valid() bool {
