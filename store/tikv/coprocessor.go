@@ -88,7 +88,7 @@ func (c *CopClient) sendReqWithAppliedIndices(
 
 // Send builds the request and gets the coprocessor iterator response.
 func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variables) kv.Response {
-	logutil.BgLogger().Error(
+	logutil.QPLogger().Info(
 		"CopClient::Send is called",
 		zap.Int64("goid", goid.Get()),
 	)
@@ -108,7 +108,7 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 		for _, task := range tasks {
 			rpcCtx, err := c.store.regionCache.GetTiKVRPCContext(bo, task.region, kv.ReplicaReadLeader, 0)
 			if err != nil {
-				logutil.BgLogger().Error("CopClient::Send gets contexts fail, fallback")
+				logutil.QPLogger().Warn("CopClient::Send gets contexts fail, fallback")
 				goto FALLBACK
 			}
 			rpcCtxArray = append(rpcCtxArray, rpcCtx)
@@ -117,16 +117,16 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 		fallback := false
 		appliedIndices, err := c.getAppliedIndices(bo, rpcCtxArray)
 		if err != nil {
-			logutil.BgLogger().Error("CopClient::Send gets applied indices fail, fallback")
+			logutil.QPLogger().Warn("CopClient::Send gets applied indices fail, fallback")
 			fallback = true
 		}
 
 		req.StartTs, err = req.StartTsFuture.Wait()
 		if err != nil {
-			logutil.BgLogger().Error("CopClient::Send wait ts fail", zap.Error(err))
+			logutil.QPLogger().Error("CopClient::Send wait ts fail", zap.Error(err))
 			return copErrorResponse{err}
 		}
-		logutil.BgLogger().Error("CopClient::Send gets start ts", zap.Uint64("ts", req.StartTs))
+		logutil.QPLogger().Info("CopClient::Send gets start ts", zap.Uint64("ts", req.StartTs))
 
 		// TODO: avoid unmarshal/marshal twice.
 		dagReq := new(tipb.DAGRequest)

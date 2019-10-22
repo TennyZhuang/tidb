@@ -1694,7 +1694,7 @@ func constructDistExec(sctx sessionctx.Context, plans []plannercore.PhysicalPlan
 func (b *executorBuilder) constructDAGReq(plans []plannercore.PhysicalPlan) (dagReq distsql.DAGReqFuture, streaming bool, err error) {
 	dagReq.DAGReq = &tipb.DAGRequest{}
 	dagReq.DAGReq.StartTs, dagReq.StartTS, err = b.getStartTSFuture()
-	logutil.BgLogger().Error(
+	logutil.QPLogger().Info(
 		"constructDAGReq, calling getStartTS",
 		zap.Int64("goid", goid.Get()),
 		zap.Uint64("ts", dagReq.DAGReq.StartTs),

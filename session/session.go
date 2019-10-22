@@ -394,16 +394,14 @@ func (s *session) FieldList(tableName string) ([]*ast.ResultField, error) {
 }
 
 func (s *session) doCommit(ctx context.Context) error {
-	logutil.BgLogger().Error(
+	logutil.QPLogger().Info(
 		"session::doCommit is called",
 		zap.Int64("goid", goid.Get()),
+		zap.Bool("pending", s.txn.Pending()),
 	)
 	// Shouldn't commit pending transactions.
 	s.txn.ChangePendingToValidIfNeed(s.getMembufCap())
-	if s.txn.Pending() {
-		logutil.BgLogger().Error("doCommit can't commit pending transactions")
-		panic("doCommit can't commit pending transactions")
-	}
+
 	if !s.txn.Valid() {
 		return nil
 	}
@@ -1325,6 +1323,9 @@ func (s *session) Txn(active bool) (kv.Transaction, error) {
 			s.sessionVars.TxnCtx.StartTS = 0
 			return &s.txn, err
 		}
+	}
+	if s.txn.Valid() {
+		// TODO: only set variables if need.
 		s.sessionVars.TxnCtx.StartTS = s.txn.StartTS()
 		if s.sessionVars.TxnCtx.IsPessimistic {
 			s.txn.SetOption(kv.Pessimistic, true)
@@ -1378,7 +1379,7 @@ func (s *session) isTxnRetryable() bool {
 }
 
 func (s *session) NewTxn(ctx context.Context) error {
-	logutil.BgLogger().Error("session::NewTxn is called")
+	logutil.QPLogger().Info("session::NewTxn is called")
 	if s.txn.Valid() {
 		txnID := s.txn.StartTS()
 		err := s.CommitTxn(ctx)
@@ -1946,7 +1947,7 @@ func (s *session) PrepareTxnCtx(ctx context.Context) {
 
 // PrepareTxnFuture uses to try to get txn future.
 func (s *session) PrepareTxnFuture(ctx context.Context) {
-	logutil.BgLogger().Error(
+	logutil.QPLogger().Info(
 		"session::PrepareTxnFuture is called",
 		zap.Int64("goid", goid.Get()),
 	)
@@ -1958,6 +1959,7 @@ func (s *session) RefreshTxnCtx(ctx context.Context) error {
 	if err := s.doCommit(ctx); err != nil {
 		return err
 	}
+
 	return s.NewTxn(ctx)
 }
 

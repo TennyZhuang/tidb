@@ -151,14 +151,15 @@ func (st *TxnState) GoString() string {
 func (st *TxnState) AttachValid(txn kv.Transaction) {
 	st.m.Lock()
 	defer st.m.Unlock()
-	logutil.BgLogger().Error(
-		"TxnState binds to a txn",
+
+	logutil.QPLogger().Info(
+		"TxnState::AttachValid",
 		zap.Int64("goid", goid.Get()),
-		zap.Bool("pending", st.pending()),
+		zap.Bool("valid_or_pending", st.pending() || st.valid()),
 	)
 
-	if st.pending() {
-		panic("TxnState::AttachValid shouldn't be call when pending")
+	if st.valid() || st.pending() {
+		panic("TxnState::AttachValid when valid or pending")
 	}
 	st.Transaction = txn
 }
@@ -166,11 +167,11 @@ func (st *TxnState) AttachValid(txn kv.Transaction) {
 func (st *TxnState) ChangeInvalidToPendingIfNeed(ctx context.Context, store kv.Storage, lowResolution bool) {
 	st.m.Lock()
 	defer st.m.Unlock()
-	logutil.BgLogger().Error(
+
+	logutil.QPLogger().Info(
 		"TxnState::ChangeInvalidToPendingIfNeed",
 		zap.Int64("goid", goid.Get()),
 		zap.Bool("valid", st.valid()),
-		zap.Bool("pending", st.pending()),
 	)
 
 	if st.valid() || st.pending() {
@@ -182,6 +183,13 @@ func (st *TxnState) ChangeInvalidToPendingIfNeed(ctx context.Context, store kv.S
 func (st *TxnState) ChangePendingToValidIfNeed(txnCap int) error {
 	st.m.Lock()
 	defer st.m.Unlock()
+
+	logutil.QPLogger().Info(
+		"TxnState::ChangePendingToValidIfNeed",
+		zap.Int64("goid", goid.Get()),
+		zap.Bool("invalid", !st.valid() && !st.pending()),
+	)
+
 	if st.valid() {
 		return nil
 	} else if st.Transaction != nil {
@@ -208,10 +216,14 @@ func (st *TxnState) ChangeToInvalid() {
 }
 
 func (st *TxnState) changeToInvalid() {
-	logutil.BgLogger().Error(
-		"TxnState::changeToInvalid is called",
+	logutil.QPLogger().Info(
+		"TxnState::changeToInvalid",
 		zap.Int64("goid", goid.Get()),
+		zap.Bool("pending", st.pending()),
 	)
+	if st.pending() {
+		panic("TxnState::changeToInvalid during pending")
+	}
 	st.Transaction = nil
 	st.txnFuture = nil
 }
@@ -502,10 +514,6 @@ func (tf *txnFuture) Wait() (uint64, error) {
 	tf.txnState.txnFuture = nil
 
 	return tf.ts, tf.e
-}
-
-func (tf *txnFuture) beginWithTs(ts uint64) (kv.Transaction, error) {
-	return tf.store.BeginWithStartTS(ts)
 }
 
 func getTxnFuture(ctx context.Context, store kv.Storage, ts *TxnState, lowResolution bool) *txnFuture {
