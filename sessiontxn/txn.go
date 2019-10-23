@@ -188,6 +188,7 @@ func (st *TxnState) ChangePendingToValidIfNeed(txnCap int) error {
 		"TxnState::ChangePendingToValidIfNeed",
 		zap.Int64("goid", goid.Get()),
 		zap.Bool("invalid", !st.valid() && !st.pending()),
+		// zap.Stack("stack"),
 	)
 
 	if st.valid() {
@@ -296,6 +297,9 @@ func (st *TxnState) reset() {
 func (st *TxnState) Get(ctx context.Context, k kv.Key) ([]byte, error) {
 	val, err := st.buf.Get(ctx, k)
 	if kv.IsErrNotFound(err) {
+		if err := st.ChangePendingToValidIfNeed(kv.DefaultTxnMembufCap); err != nil {
+			return nil, err
+		}
 		val, err = st.Transaction.Get(ctx, k)
 		if kv.IsErrNotFound(err) {
 			return nil, err
@@ -327,10 +331,19 @@ func (st *TxnState) BatchGet(ctx context.Context, keys []kv.Key) (map[string][]b
 			bufferValues[i] = val
 		}
 	}
-	storageValues, err := st.Transaction.BatchGet(ctx, shrinkKeys)
-	if err != nil {
-		return nil, err
+
+	var storageValues map[string][]byte = make(map[string][]byte)
+	if len(shrinkKeys) > 0 {
+		if err := st.ChangePendingToValidIfNeed(kv.DefaultTxnMembufCap); err != nil {
+			return nil, err
+		}
+		svs, err := st.Transaction.BatchGet(ctx, shrinkKeys)
+		if err != nil {
+			return nil, err
+		}
+		storageValues = svs
 	}
+
 	for i, key := range keys {
 		if bufferValues[i] == nil {
 			continue
@@ -356,6 +369,9 @@ func (st *TxnState) Iter(k kv.Key, upperBound kv.Key) (kv.Iterator, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := st.ChangePendingToValidIfNeed(kv.DefaultTxnMembufCap); err != nil {
+		return nil, err
+	}
 	retrieverIt, err := st.Transaction.Iter(k, upperBound)
 	if err != nil {
 		return nil, err
@@ -367,6 +383,9 @@ func (st *TxnState) Iter(k kv.Key, upperBound kv.Key) (kv.Iterator, error) {
 func (st *TxnState) IterReverse(k kv.Key) (kv.Iterator, error) {
 	bufferIt, err := st.buf.IterReverse(k)
 	if err != nil {
+		return nil, err
+	}
+	if err := st.ChangePendingToValidIfNeed(kv.DefaultTxnMembufCap); err != nil {
 		return nil, err
 	}
 	retrieverIt, err := st.Transaction.IterReverse(k)
