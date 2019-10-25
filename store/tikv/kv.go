@@ -277,7 +277,7 @@ func (s *tikvStore) BeginWithStartTS(startTS uint64) (kv.Transaction, error) {
 	logutil.QPLogger().Info(
 		"tikvStore::BeginWithStartTS",
 		zap.Int64("goid", goid.Get()),
-		zap.Stack("stack"),
+		// zap.Stack("stack"),
 	)
 	txn, err := newTikvTxnWithStartTS(s, startTS, s.nextReplicaReadSeed())
 	if err != nil {

@@ -40,7 +40,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/petermattis/goid"
+	"github.com/pingcap/kvproto/pkg/tikvpb"
+	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tipb/go-tipb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 var tikvTxnRegionsNumHistogramWithCoprocessor = metrics.TiKVTxnRegionsNumHistogram.WithLabelValues("coprocessor")
@@ -51,14 +55,17 @@ type CopClient struct {
 	store           *tikvStore
 	replicaReadSeed uint32
 
-	// `selfRegion` indicates which data center the TiDB is in.
-	selfRegion   string
-	cachedStores []*metapb.Store
+	selfRegion    string
+	primaryRegion string
+	cachedStores  []*metapb.Store
+
+	conns map[string]*grpc.ClientConn
 }
 
-func (c *CopClient) getTikvStoresInSameRegion(ctx context.Context) (filtered []*metapb.Store, err error) {
+func (c *CopClient) getTikvStoresInRegion(ctx context.Context, region string) (filtered []*metapb.Store, err error) {
 	if len(c.cachedStores) == 0 {
 		c.cachedStores, err = c.store.GetPDClient().GetAllStores(ctx)
+		logutil.QPLogger().Info("CopClient::getStores success")
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +73,7 @@ func (c *CopClient) getTikvStoresInSameRegion(ctx context.Context) (filtered []*
 
 	filtered = make([]*metapb.Store, 0, len(c.cachedStores))
 	for _, s := range c.cachedStores {
-		if s.Region == c.selfRegion {
+		if s.Region == region {
 			filtered = append(filtered, s)
 		}
 	}
@@ -74,6 +81,75 @@ func (c *CopClient) getTikvStoresInSameRegion(ctx context.Context) (filtered []*
 }
 
 func (c *CopClient) getAppliedIndices(bo *Backoffer, ctxArray []*RPCContext) ([]uint64, error) {
+	if c.selfRegion == "" {
+		cfg := config.GetGlobalConfig()
+		c.selfRegion = cfg.Region
+		c.primaryRegion = "Beijing" // Hard code for now.
+	}
+	stores, err := c.getTikvStoresInRegion(bo.ctx, c.primaryRegion)
+	if err != nil {
+		return nil, err
+	}
+
+	if c.conns == nil {
+		c.conns = make(map[string]*grpc.ClientConn)
+	}
+
+	for _, store := range stores {
+		addr := store.GetAddress()
+		logutil.QPLogger().Info("getAppliedIndices trying", zap.String("addr", addr))
+
+		conn := c.conns[addr]
+		if conn == nil {
+			var err error
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			conn, err = grpc.DialContext(
+				ctx,
+				addr,
+				grpc.WithInsecure(),
+				grpc.WithBackoffMaxDelay(time.Second*3),
+				grpc.WithKeepaliveParams(keepalive.ClientParameters{
+					Time:                time.Duration(10) * time.Second,
+					Timeout:             time.Duration(3) * time.Second,
+					PermitWithoutStream: true,
+				}),
+			)
+			cancel()
+			if err != nil {
+				logutil.QPLogger().Warn("establish grpc conn", zap.Error(err))
+				return nil, err
+			}
+			c.conns[addr] = conn
+		}
+		logutil.QPLogger().Info("getAppliedIndices get conn sucess")
+
+		client := tikvpb.NewDCProxyClient(conn)
+		// Construct the request.
+		var req = new(kvrpcpb.GetCommittedIndexAndTsRequest)
+		for _, c := range ctxArray {
+			reqCtx := &kvrpcpb.Context{
+				RegionId: c.Region.GetID(),
+				RegionEpoch: &metapb.RegionEpoch{
+					ConfVer: c.Region.confVer,
+					Version: c.Region.ver,
+				},
+				Peer: c.Peer,
+			}
+			req.Contexts = append(req.Contexts, reqCtx)
+		}
+		resp, err := client.GetCommittedIndexAndTs(bo.ctx, req)
+		if err != nil {
+			logutil.QPLogger().Warn("RPC GetCommittedIndexAndTs", zap.Error(err))
+			return nil, err
+		}
+
+		for _, committedIndex := range resp.GetCommittedIndices() {
+			if committedIndex == 0 {
+				return nil, errors.New("GetCommittedIndexAndTs meets 0")
+			}
+		}
+		return resp.GetCommittedIndices(), nil
+	}
 	return nil, errors.New("unimplemented")
 }
 
@@ -117,7 +193,10 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 		fallback := false
 		appliedIndices, err := c.getAppliedIndices(bo, rpcCtxArray)
 		if err != nil {
-			logutil.QPLogger().Warn("CopClient::Send gets applied indices fail, fallback")
+			logutil.QPLogger().Warn(
+				"CopClient::Send gets applied indices fail, fallback",
+				zap.Error(err),
+			)
 			fallback = true
 		}
 
@@ -140,9 +219,13 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 			goto FALLBACK
 		}
 
-		stores, err := c.getTikvStoresInSameRegion(ctx)
+		stores, err := c.getTikvStoresInRegion(ctx, c.selfRegion)
 		if err != nil {
 			return copErrorResponse{err}
+		}
+		if len(stores) == 0 {
+			logutil.QPLogger().Info("No stores, fallback", zap.String("region", c.selfRegion))
+			goto FALLBACK
 		}
 		for _, s := range stores {
 			resp, err := c.sendReqWithAppliedIndices(req, tasks, appliedIndices, s)
@@ -152,8 +235,8 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 			return resp
 		}
 	}
-FALLBACK:
 
+FALLBACK:
 	it := &copIterator{
 		store:           c.store,
 		req:             req,

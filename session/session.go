@@ -555,6 +555,7 @@ func (s *session) RollbackTxn(ctx context.Context) {
 		}
 	}
 	s.cleanRetryInfo()
+	s.txn.ChangePendingToValidIfNeed(kv.DefaultTxnMembufCap) // Maybe in ChangeToInvalid is better
 	s.txn.ChangeToInvalid()
 	s.sessionVars.TxnCtx.Cleanup()
 	s.sessionVars.SetStatusFlag(mysql.ServerStatusInTrans, false)

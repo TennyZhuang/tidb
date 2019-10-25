@@ -152,15 +152,20 @@ func (st *TxnState) AttachValid(txn kv.Transaction) {
 	st.m.Lock()
 	defer st.m.Unlock()
 
-	logutil.QPLogger().Info(
-		"TxnState::AttachValid",
-		zap.Int64("goid", goid.Get()),
-		zap.Bool("valid_or_pending", st.pending() || st.valid()),
-	)
-
 	if st.valid() || st.pending() {
-		panic("TxnState::AttachValid when valid or pending")
+		logutil.QPLogger().Warn(
+			"TxnState::AttachValid",
+			zap.Int64("goid", goid.Get()),
+			zap.Bool("valid_or_pending", st.pending() || st.valid()),
+		)
+	} else {
+		logutil.QPLogger().Info(
+			"TxnState::AttachValid",
+			zap.Int64("goid", goid.Get()),
+			zap.Bool("valid_or_pending", st.pending() || st.valid()),
+		)
 	}
+
 	st.Transaction = txn
 }
 

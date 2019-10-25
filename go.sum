@@ -5,6 +5,10 @@ github.com/StackExchange/wmi v0.0.0-20180725035823-b12b22c5341f h1:5ZfJxyXo8KyX8
 github.com/StackExchange/wmi v0.0.0-20180725035823-b12b22c5341f/go.mod h1:3eOhrUMpNV+6aFIbp5/iudMxNCF27Vw2OZgy4xEx0Fg=
 github.com/TennyZhuang/kvproto v0.0.0-20191014051905-14a9d2ffcaeb h1:4tr60Vc/F/Fm9hlCaQJygLJc4Fs3m4Y7aQEwDItHeFo=
 github.com/TennyZhuang/kvproto v0.0.0-20191014051905-14a9d2ffcaeb/go.mod h1:QMdbTAXCHzzygQzqcG9uVUgU2fKeSN1GmfMiykdSzzY=
+github.com/TennyZhuang/kvproto v0.0.0-20191019123819-a14045b23c2e h1:jQvUvnDUxWYIuuoFNaS4nDWQYAyyEHfG/J+BIh+6uEc=
+github.com/TennyZhuang/kvproto v0.0.0-20191019123819-a14045b23c2e/go.mod h1:QMdbTAXCHzzygQzqcG9uVUgU2fKeSN1GmfMiykdSzzY=
+github.com/TennyZhuang/kvproto v0.0.0-20191025071215-cb804e7d696f h1:hfhXvoDy0v9OLsYCLi5Wn4bhzTbQxXGEcIcqcIvsFng=
+github.com/TennyZhuang/kvproto v0.0.0-20191025071215-cb804e7d696f/go.mod h1:WWLmULLO7l8IOcQG+t+ItJ3fEcrL5FxF0Wu+HrMy26w=
 github.com/TennyZhuang/pd v0.0.0-20191014112351-59b7c129fc63 h1:nxM5gBmdz71tIGgjsqK+U6zifb9jkqqFIs4f0eCfr6w=
 github.com/TennyZhuang/pd v0.0.0-20191014112351-59b7c129fc63/go.mod h1:79lhPKBo/NsHB//BNMLiO4Dqx8bCovmix9+Fbgj6x4A=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
