@@ -182,7 +182,7 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 		// Improvement for access TiKVs and PDs in different DCs.
 		var rpcCtxArray = make([]*RPCContext, 0, len(tasks))
 		for _, task := range tasks {
-			rpcCtx, err := c.store.regionCache.GetTiKVRPCContext(bo, task.region, kv.ReplicaReadLeader, 0)
+			rpcCtx, err := c.store.regionCache.GetTiKVRPCContext(bo, task.region, kv.ReplicaReadLeader, 0, "")
 			if err != nil {
 				logutil.QPLogger().Warn("CopClient::Send gets contexts fail, fallback")
 				goto FALLBACK
@@ -190,14 +190,18 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 			rpcCtxArray = append(rpcCtxArray, rpcCtx)
 		}
 
-		fallback := false
 		appliedIndices, err := c.getAppliedIndices(bo, rpcCtxArray)
 		if err != nil {
 			logutil.QPLogger().Warn(
 				"CopClient::Send gets applied indices fail, fallback",
 				zap.Error(err),
 			)
-			fallback = true
+		} else {
+			for i, task := range tasks {
+				// task.readRegion = c.selfRegion
+				task.readRegion = c.primaryRegion // TODO: should be self region.
+				task.appliedIndex = appliedIndices[i]
+			}
 		}
 
 		req.StartTs, err = req.StartTsFuture.Wait()
@@ -213,26 +217,6 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, vars *kv.Variable
 		dagReq.StartTs = req.StartTs
 		if req.Data, err = dagReq.Marshal(); err != nil {
 			panic("marshal dag request shoudn't fail")
-		}
-
-		if fallback {
-			goto FALLBACK
-		}
-
-		stores, err := c.getTikvStoresInRegion(ctx, c.selfRegion)
-		if err != nil {
-			return copErrorResponse{err}
-		}
-		if len(stores) == 0 {
-			logutil.QPLogger().Info("No stores, fallback", zap.String("region", c.selfRegion))
-			goto FALLBACK
-		}
-		for _, s := range stores {
-			resp, err := c.sendReqWithAppliedIndices(req, tasks, appliedIndices, s)
-			if err != nil {
-				return copErrorResponse{err}
-			}
-			return resp
 		}
 	}
 
@@ -272,6 +256,10 @@ type copTask struct {
 	storeAddr string
 	cmdType   tikvrpc.CmdType
 	storeType kv.StoreType
+
+	// For read on followers or learners.
+	appliedIndex uint64
+	readRegion   string
 }
 
 func (r *copTask) String() string {
@@ -826,17 +814,20 @@ func (worker *copIteratorWorker) handleTaskOnce(bo *Backoffer, task *copTask, ch
 	})
 
 	sender := NewRegionRequestSender(worker.store.regionCache, worker.store.client)
-	req := tikvrpc.NewReplicaReadRequest(task.cmdType, &coprocessor.Request{
-		Tp:     worker.req.Tp,
-		Data:   worker.req.Data,
-		Ranges: task.ranges.toPBRanges(),
-	}, worker.req.ReplicaRead, worker.replicaReadSeed, kvrpcpb.Context{
+	copReq := &coprocessor.Request{
+		Tp:           worker.req.Tp,
+		Data:         worker.req.Data,
+		Ranges:       task.ranges.toPBRanges(),
+		AppliedIndex: task.appliedIndex,
+	}
+	ctx := kvrpcpb.Context{
 		IsolationLevel: pbIsolationLevel(worker.req.IsolationLevel),
 		Priority:       kvPriorityToCommandPri(worker.req.Priority),
 		NotFillCache:   worker.req.NotFillCache,
 		HandleTime:     true,
 		ScanDetail:     true,
-	})
+	}
+	req := tikvrpc.NewReplicaReadRequest(task.cmdType, copReq, worker.req.ReplicaRead, worker.replicaReadSeed, task.readRegion, ctx)
 	startTime := time.Now()
 	resp, rpcCtx, err := sender.SendReqCtx(bo, req, task.region, ReadTimeoutMedium, task.storeType)
 	if err != nil {
