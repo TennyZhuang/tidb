@@ -23,11 +23,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/coprocessor"
 	"github.com/pingcap/kvproto/pkg/debugpb"
+	pb "github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/tikvpb"
 	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/config"
@@ -66,6 +67,11 @@ type Client interface {
 	Close() error
 	// SendRequest sends Request.
 	SendRequest(ctx context.Context, addr string, req *tikvrpc.Request, timeout time.Duration) (*tikvrpc.Response, error)
+}
+
+type DcClient interface {
+	// SendRequest(ctx context.Context, addr )
+	TxnWrite(ctx context.Context, addr string, req *pb.TransactionWriteRequest) (*pb.TransactionWriteResponse, error)
 }
 
 type connArray struct {
@@ -351,6 +357,17 @@ func (c *rpcClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.R
 	}
 	copStream.Response = first
 	return resp, nil
+}
+
+func (c *rpcClient) TxnWrite(ctx context.Context, addr string, req *pb.TransactionWriteRequest) (*pb.TransactionWriteResponse, error) {
+	connArray, err := c.getConnArray(addr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	clientConn := connArray.Get()
+	client := tikvpb.NewDCProxyClient(clientConn)
+	return client.TransactionWrite(ctx, req)
 }
 
 func (c *rpcClient) Close() error {

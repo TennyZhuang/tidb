@@ -28,6 +28,10 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/errorpb"
+	"github.com/pingcap/kvproto/pkg/kvrpcpb"
+	pb "github.com/pingcap/kvproto/pkg/kvrpcpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/kv"
@@ -143,6 +147,8 @@ type tikvStore struct {
 	tlsConfig    *tls.Config
 	mock         bool
 	enableGC     bool
+
+	cachedStores []*metapb.Store
 
 	kv        SafePointKV
 	safePoint uint64
@@ -396,6 +402,66 @@ func (s *tikvStore) SupportDeleteRange() (supported bool) {
 func (s *tikvStore) SendReq(bo *Backoffer, req *tikvrpc.Request, regionID RegionVerID, timeout time.Duration) (*tikvrpc.Response, error) {
 	sender := NewRegionRequestSender(s.regionCache, s.client)
 	return sender.SendReq(bo, req, regionID, timeout)
+}
+
+func (c *tikvStore) getTikvStoresInRegion(ctx context.Context, region string) (filtered []*metapb.Store, err error) {
+	if len(c.cachedStores) == 0 {
+		c.cachedStores, err = c.pdClient.GetAllStores(ctx)
+		logutil.QPLogger().Info("CopClient::getStores success")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	filtered = make([]*metapb.Store, 0, len(c.cachedStores))
+	for _, s := range c.cachedStores {
+		if s.Region == region {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
+}
+
+func (s *tikvStore) TxnWrite(bo *Backoffer, req *pb.TransactionWriteRequest, regions []RegionVerID) (*pb.TransactionWriteResponse, error) {
+	// TODO: better context
+	ctx := context.Background()
+	stores, err := s.getTikvStoresInRegion(ctx, "Beijing")
+	if err != nil {
+		return nil, err
+	}
+
+	needs := make([]bool, len(req.PreWrites))
+	for i := range needs {
+		needs[i] = true
+	}
+	for {
+		for i, prewrite := range req.PreWrites {
+			regionID := regions[i]
+			rpcCtx, err := s.regionCache.GetTiKVRPCContext(bo, regionID, kv.ReplicaReadLeader, 0, "")
+			return nil, err
+			if rpcCtx == nil {
+				// If the region is not found in cache, it must be out
+				// of date and already be cleaned up.
+				_ = kvrpcpb.PrewriteResponse{
+					RegionError: &errorpb.Error{EpochNotMatch: &errorpb.EpochNotMatch{}},
+				}
+
+				continue
+			}
+
+			reqCtx := &pb.Context{
+				RegionId:    rpcCtx.Meta.Id,
+				RegionEpoch: rpcCtx.Meta.RegionEpoch,
+				Peer:        rpcCtx.Peer,
+			}
+			prewrite.Context = reqCtx
+			prewrite.Need = needs[i]
+		}
+
+		addr := stores[rand.Intn(len(stores))].Address
+		// TODO: handle region error and retry here.
+		return s.client.(DcClient).TxnWrite(ctx, addr, req)
+	}
 }
 
 func (s *tikvStore) GetRegionCache() *RegionCache {

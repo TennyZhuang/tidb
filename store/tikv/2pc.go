@@ -937,7 +937,7 @@ func (c *twoPhaseCommitter) pessimisticRollbackKeys(bo *Backoffer, keys [][]byte
 }
 
 func (c *twoPhaseCommitter) executeAndWriteFinishBinlog(ctx context.Context) error {
-	err := c.execute(ctx)
+	err := c.executeDC(ctx)
 	if err != nil {
 		c.writeFinishBinlog(ctx, binlog.BinlogType_Rollback, 0)
 	} else {
@@ -1058,6 +1058,175 @@ func (c *twoPhaseCommitter) execute(ctx context.Context) error {
 			zap.Error(err),
 			zap.Uint64("txnStartTS", c.startTS))
 	}
+	return nil
+}
+
+func (c *twoPhaseCommitter) createBatches(action twoPhaseCommitAction, bo *Backoffer, keys [][]byte) ([]batchKeys, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	groups, firstRegion, err := c.store.regionCache.GroupKeysByRegion(bo, keys, nil)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	metrics.TiKVTxnRegionsNumHistogram.WithLabelValues(action.MetricsTag()).Observe(float64(len(groups)))
+
+	var batches []batchKeys
+	var sizeFunc = c.keySize
+	if action == actionPrewrite {
+		// Do not update regionTxnSize on retries. They are not used when building a PrewriteRequest.
+		if len(bo.errors) == 0 {
+			for region, keys := range groups {
+				c.regionTxnSize[region.id] = len(keys)
+			}
+		}
+		sizeFunc = c.keyValueSize
+		atomic.AddInt32(&c.getDetail().PrewriteRegionNum, int32(len(groups)))
+	}
+	// Make sure the group that contains primary key goes first.
+	batches = appendBatchBySize(batches, firstRegion, groups[firstRegion], sizeFunc, txnCommitBatchSize)
+	delete(groups, firstRegion)
+	for id, g := range groups {
+		batches = appendBatchBySize(batches, id, g, sizeFunc, txnCommitBatchSize)
+	}
+	return batches, nil
+}
+
+// execute executes the two-phase commit protocol.
+func (c *twoPhaseCommitter) executeDC(ctx context.Context) error {
+	defer func() {
+		// Always clean up all written keys if the txn does not commit.
+		c.mu.RLock()
+		committed := c.mu.committed
+		undetermined := c.mu.undeterminedErr != nil
+		c.mu.RUnlock()
+		if !committed && !undetermined {
+			c.cleanWg.Add(1)
+			go func() {
+				cleanupKeysCtx := context.WithValue(context.Background(), txnStartKey, ctx.Value(txnStartKey))
+				err := c.cleanupKeys(NewBackoffer(cleanupKeysCtx, cleanupMaxBackoff).WithVars(c.txn.vars), c.keys)
+				if err != nil {
+					tikvSecondaryLockCleanupFailureCounterRollback.Inc()
+					logutil.Logger(ctx).Info("2PC cleanup failed",
+						zap.Error(err),
+						zap.Uint64("txnStartTS", c.startTS))
+				} else {
+					logutil.Logger(ctx).Info("2PC clean up done",
+						zap.Uint64("txnStartTS", c.startTS))
+				}
+				c.cleanWg.Done()
+			}()
+		}
+	}()
+
+	txnReq := &pb.TransactionWriteRequest{}
+	binlogChan := c.prewriteBinlog(ctx)
+	prewriteBo := NewBackoffer(ctx, prewriteMaxBackoff).WithVars(c.txn.vars)
+	// start := time.Now()
+	batches, err := c.createBatches(actionPrewrite, prewriteBo, c.keys)
+	if err != nil {
+		logutil.Logger(ctx).Debug("2PC failed on prewrite",
+			zap.Error(err),
+			zap.Uint64("txnStartTS", c.startTS))
+		return errors.Trace(err)
+	}
+	regions := make([]RegionVerID, 0, len(batches))
+	for _, batch := range batches {
+		txnReq.PreWrites = append(txnReq.PreWrites, c.buildPrewriteRequest(batch, uint64(c.regionTxnSize[batch.region.id])).Prewrite())
+		regions = append(regions, batch.region)
+	}
+
+	if binlogChan != nil {
+		binlogErr := <-binlogChan
+		if binlogErr != nil {
+			return errors.Trace(binlogErr)
+		}
+	}
+
+	_, err = c.store.TxnWrite(prewriteBo, txnReq, regions)
+	return err
+	// err = c.prewriteKeys(prewriteBo, c.keys)
+	// commitDetail := c.getDetail()
+	// commitDetail.PrewriteTime = time.Since(start)
+	// if prewriteBo.totalSleep > 0 {
+	// 	atomic.AddInt64(&commitDetail.CommitBackoffTime, int64(prewriteBo.totalSleep)*int64(time.Millisecond))
+	// 	commitDetail.Mu.Lock()
+	// 	commitDetail.Mu.BackoffTypes = append(commitDetail.Mu.BackoffTypes, prewriteBo.types...)
+	// 	commitDetail.Mu.Unlock()
+	// }
+	// if binlogChan != nil {
+	// 	binlogErr := <-binlogChan
+	// 	if binlogErr != nil {
+	// 		return errors.Trace(binlogErr)
+	// 	}
+	// }
+	// if err != nil {
+	// 	logutil.Logger(ctx).Debug("2PC failed on prewrite",
+	// 		zap.Error(err),
+	// 		zap.Uint64("txnStartTS", c.startTS))
+	// 	return errors.Trace(err)
+	// }
+
+	// start = time.Now()
+	// logutil.Event(ctx, "start get commit ts")
+	// commitTS, err := c.store.getTimestampWithRetry(NewBackoffer(ctx, tsoMaxBackoff).WithVars(c.txn.vars))
+	// if err != nil {
+	// 	logutil.Logger(ctx).Warn("2PC get commitTS failed",
+	// 		zap.Error(err),
+	// 		zap.Uint64("txnStartTS", c.startTS))
+	// 	return errors.Trace(err)
+	// }
+	// commitDetail.GetCommitTsTime = time.Since(start)
+	// logutil.Event(ctx, "finish get commit ts")
+	// logutil.SetTag(ctx, "commitTs", commitTS)
+
+	// // check commitTS
+	// if commitTS <= c.startTS {
+	// 	err = errors.Errorf("conn %d Invalid transaction tso with txnStartTS=%v while txnCommitTS=%v",
+	// 		c.connID, c.startTS, commitTS)
+	// 	logutil.BgLogger().Error("invalid transaction", zap.Error(err))
+	// 	return errors.Trace(err)
+	// }
+	// c.commitTS = commitTS
+	// if err = c.checkSchemaValid(); err != nil {
+	// 	return errors.Trace(err)
+	// }
+
+	// if c.store.oracle.IsExpired(c.startTS, kv.MaxTxnTimeUse) {
+	// 	err = errors.Errorf("conn %d txn takes too much time, txnStartTS: %d, comm: %d",
+	// 		c.connID, c.startTS, c.commitTS)
+	// 	return err
+	// }
+
+	// start = time.Now()
+	// commitBo := NewBackoffer(ctx, CommitMaxBackoff).WithVars(c.txn.vars)
+	// err = c.commitKeys(commitBo, c.keys)
+	// commitDetail.CommitTime = time.Since(start)
+	// if commitBo.totalSleep > 0 {
+	// 	atomic.AddInt64(&commitDetail.CommitBackoffTime, int64(commitBo.totalSleep)*int64(time.Millisecond))
+	// 	commitDetail.Mu.Lock()
+	// 	commitDetail.Mu.BackoffTypes = append(commitDetail.Mu.BackoffTypes, commitBo.types...)
+	// 	commitDetail.Mu.Unlock()
+	// }
+	// if err != nil {
+	// 	if undeterminedErr := c.getUndeterminedErr(); undeterminedErr != nil {
+	// 		logutil.Logger(ctx).Error("2PC commit result undetermined",
+	// 			zap.Error(err),
+	// 			zap.NamedError("rpcErr", undeterminedErr),
+	// 			zap.Uint64("txnStartTS", c.startTS))
+	// 		err = errors.Trace(terror.ErrResultUndetermined)
+	// 	}
+	// 	if !c.mu.committed {
+	// 		logutil.Logger(ctx).Debug("2PC failed on commit",
+	// 			zap.Error(err),
+	// 			zap.Uint64("txnStartTS", c.startTS))
+	// 		return errors.Trace(err)
+	// 	}
+	// 	logutil.Logger(ctx).Debug("got some exceptions, but 2PC was still successful",
+	// 		zap.Error(err),
+	// 		zap.Uint64("txnStartTS", c.startTS))
+	// }
 	return nil
 }
 
